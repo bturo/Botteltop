@@ -11,13 +11,10 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 from src.config import (
     API_ID, API_HASH, SOURCE_CHANNEL, TARGET_CHANNEL,
-    SESSION_STRING, GIST_TOKEN, GIST_ID
-)
-from src.utils import (
-    replace_filembad, clean_config_text, get_config_hash,
-    load_from_gist, save_to_gist
+    SESSION_STRING
 )
 
 # تنظیمات لاگ
@@ -34,34 +31,29 @@ async def main():
     """تابع اصلی ربات"""
     logger.info("🚀 شروع ربات مدیریت کانال تلگرام")
     
-    # بارگذاری hashهای ارسال شده
-    if GIST_TOKEN and GIST_ID:
-        sent_hashes = load_from_gist(GIST_TOKEN, GIST_ID)
-        logger.info(f"📊 {len(sent_hashes)} هش از قبل ذخیره شده")
-    else:
-        sent_hashes = set()
-        logger.info("📊 شروع جدید - بدون داده ذخیره شده")
+    if not SESSION_STRING:
+        logger.error("❌ SESSION_STRING یافت نشد!")
+        return
     
-    # ایجاد کلاینت تلگرام
-    client = TelegramClient(
-        'bot_session',
-        API_ID,
-        API_HASH,
-        connection_retries=3,
-        timeout=20
-    )
-    
+    # ایجاد کلاینت تلگرام با StringSession
     try:
+        session = StringSession(SESSION_STRING)
+        client = TelegramClient(
+            session,
+            API_ID,
+            API_HASH,
+            connection_retries=3,
+            timeout=20
+        )
+        
         # اتصال به تلگرام
         logger.info("🔗 در حال اتصال به تلگرام...")
+        await client.connect()
         
-        if SESSION_STRING:
-            await client.connect()
-            await client.sign_in(session_string=SESSION_STRING)
-            logger.info("✅ با session string وارد شد")
-        else:
-            await client.start()
-            logger.info("✅ با start() وارد شد")
+        # بررسی اینکه آیا session معتبر است
+        if not await client.is_user_authorized():
+            logger.error("❌ session string نامعتبر است!")
+            return
         
         # اطلاعات کاربر
         me = await client.get_me()
@@ -77,8 +69,8 @@ async def main():
             logger.error(f"❌ خطا در دریافت کانال‌ها: {e}")
             return
         
-        # دریافت پیام‌های جدید (آخرین 30 پیام)
-        messages = await client.get_messages(source_entity, limit=30)
+        # دریافت پیام‌های جدید (آخرین 20 پیام)
+        messages = await client.get_messages(source_entity, limit=20)
         logger.info(f"📨 {len(messages)} پیام دریافت شد")
         
         configs_sent = 0
@@ -103,15 +95,12 @@ async def main():
                     matches = re.findall(pattern, text, re.IGNORECASE)
                     for match in matches:
                         # پاکسازی
-                        clean_config = replace_filembad(match)
-                        clean_config = clean_config_text(clean_config)
+                        clean_config = match.replace('filembad', 'TaKziBaM')
+                        clean_config = clean_config.strip()
+                        clean_config = re.sub(r'[\n\r]+', '', clean_config)
+                        clean_config = re.sub(r'\s+', ' ', clean_config)
                         
                         if len(clean_config) < 10:
-                            continue
-                        
-                        # بررسی تکراری
-                        config_hash = get_config_hash(clean_config)
-                        if config_hash in sent_hashes:
                             continue
                         
                         # ایجاد کپشن
@@ -128,9 +117,6 @@ async def main():
                                 link_preview=False
                             )
                             
-                            # ذخیره hash
-                            sent_hashes.add(config_hash)
-                            
                             if config_type == 'v2ray':
                                 configs_sent += 1
                             else:
@@ -146,13 +132,6 @@ async def main():
         
         logger.info(f"🎯 نتیجه: {configs_sent} کانفیگ و {proxies_sent} پروکسی ارسال شد")
         
-        # ذخیره hashها در Gist
-        if GIST_TOKEN and GIST_ID:
-            if save_to_gist(sent_hashes, GIST_TOKEN, GIST_ID):
-                logger.info(f"💾 {len(sent_hashes)} هش در Gist ذخیره شد")
-            else:
-                logger.error("❌ خطا در ذخیره‌سازی Gist")
-        
     except Exception as e:
         logger.error(f"💥 خطای کلی: {e}")
         import traceback
@@ -160,9 +139,12 @@ async def main():
     
     finally:
         # قطع اتصال
-        if client.is_connected():
-            await client.disconnect()
-            logger.info("✅ اتصال قطع شد")
+        try:
+            if client and client.is_connected():
+                await client.disconnect()
+                logger.info("✅ اتصال قطع شد")
+        except:
+            pass
 
 if __name__ == '__main__':
     asyncio.run(main())
