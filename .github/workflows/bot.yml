@@ -1,0 +1,171 @@
+name: Telegram Channel Bot
+
+on:
+  workflow_dispatch:  # اجرای دستی
+  schedule:
+    - cron: '*/5 * * * *'  # هر 5 دقیقه
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: pip install telethon requests
+      
+    - name: Create bot script
+      run: |
+        cat > bot_runner.py << 'EOF'
+import os
+import re
+import asyncio
+import sys
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+import hashlib
+
+# تنظیمات
+API_ID = int(os.environ.get('API_ID', 31356424))
+API_HASH = os.environ.get('API_HASH', '45ef11a0374c78dc7ced3d28f5cec9b5')
+SOURCE_CHANNEL = os.environ.get('SOURCE_CHANNEL', 'https://t.me/filembad')
+TARGET_CHANNEL = os.environ.get('TARGET_CHANNEL', '@TaKziBaM')
+SESSION_STRING = os.environ.get('SESSION_STRING', '')
+
+print("🤖 شروع ربات مدیریت کانال...")
+print(f"API_ID: {API_ID}")
+print(f"SOURCE: {SOURCE_CHANNEL}")
+print(f"TARGET: {TARGET_CHANNEL}")
+
+# توابع کمکی
+def replace_filembad(text):
+    return text.replace('filembad', 'TaKziBaM')
+
+def clean_config_text(text):
+    text = text.strip()
+    text = re.sub(r'[\n\r]+', '', text)
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r':\s*//', '://', text)
+    return text
+
+def get_config_hash(config_text):
+    clean = config_text.lower().strip()
+    clean = re.sub(r'\s+', '', clean)
+    clean = re.sub(r'@takzibam', '', clean, flags=re.IGNORECASE)
+    return hashlib.md5(clean.encode()).hexdigest()
+
+async def main():
+    if not SESSION_STRING:
+        print("❌ SESSION_STRING یافت نشد!")
+        return
+    
+    # ایجاد کلاینت
+    try:
+        session = StringSession(SESSION_STRING)
+        client = TelegramClient(session, API_ID, API_HASH)
+        
+        await client.connect()
+        print("✅ متصل شد به تلگرام")
+        
+        # بررسی اتصال
+        if not await client.is_user_authorized():
+            print("❌ session string نامعتبر!")
+            return
+        
+        me = await client.get_me()
+        print(f"👤 کاربر: {me.first_name}")
+        
+        # دریافت کانال‌ها
+        try:
+            source_entity = await client.get_entity(SOURCE_CHANNEL)
+            target_entity = await client.get_entity(TARGET_CHANNEL)
+            print(f"📥 کانال منبع: {source_entity.title}")
+            print(f"📤 کانال مقصد: {target_entity.title}")
+        except Exception as e:
+            print(f"❌ خطا در دریافت کانال‌ها: {e}")
+            return
+        
+        # دریافت پیام‌ها
+        messages = await client.get_messages(source_entity, limit=20)
+        print(f"📨 {len(messages)} پیام دریافت شد")
+        
+        sent_hashes = set()
+        configs_sent = 0
+        proxies_sent = 0
+        
+        # الگوهای جستجو
+        patterns = [
+            (r'(vless://[^\s"\']+)', 'v2ray'),
+            (r'(vmess://[^\s"\']+)', 'v2ray'),
+            (r'(trojan://[^\s"\']+)', 'v2ray'),
+            (r'(ss://[^\s"\']+)', 'v2ray'),
+            (r'(https://t\.me/proxy[^\s"\']*)', 'proxy')
+        ]
+        
+        # پردازش پیام‌ها
+        for message in reversed(messages):
+            if message.text:
+                text = message.text
+                
+                for pattern, config_type in patterns:
+                    matches = re.findall(pattern, text, re.IGNORECASE)
+                    for match in matches:
+                        clean_config = replace_filembad(match)
+                        clean_config = clean_config_text(clean_config)
+                        
+                        if len(clean_config) < 10:
+                            continue
+                        
+                        config_hash = get_config_hash(clean_config)
+                        
+                        if config_hash not in sent_hashes:
+                            sent_hashes.add(config_hash)
+                            
+                            if config_type == 'v2ray':
+                                caption = f"کانفینگ جدید v2ray\n\n{clean_config}\n\n@{TARGET_CHANNEL.replace('@', '')}"
+                                configs_sent += 1
+                            else:
+                                caption = f"پروکسی جدید تلگرام\n\n{clean_config}\n\n@{TARGET_CHANNEL.replace('@', '')}"
+                                proxies_sent += 1
+                            
+                            try:
+                                await client.send_message(
+                                    target_entity,
+                                    caption,
+                                    link_preview=False
+                                )
+                                print(f"✅ {config_type} ارسال شد")
+                                await asyncio.sleep(1)
+                            except Exception as e:
+                                print(f"❌ خطا در ارسال: {e}")
+        
+        print(f"🎯 نتیجه: {configs_sent} کانفیگ و {proxies_sent} پروکسی ارسال شد")
+        
+        await client.disconnect()
+        print("✅ اتصال قطع شد")
+        
+    except Exception as e:
+        print(f"💥 خطای کلی: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == '__main__':
+    asyncio.run(main())
+EOF
+        
+    - name: Run Bot
+      env:
+        API_ID: ${{ secrets.API_ID }}
+        API_HASH: ${{ secrets.API_HASH }}
+        SOURCE_CHANNEL: ${{ secrets.SOURCE_CHANNEL }}
+        TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
+        SESSION_STRING: ${{ secrets.SESSION_STRING }}
+      run: python bot_runner.py
