@@ -1,5 +1,4 @@
 import os
-
 import re
 import asyncio
 from telethon import TelegramClient, events
@@ -8,13 +7,20 @@ import hashlib
 from collections import deque
 import time
 
-# تنظیمات
-API_ID = 31356424
-API_HASH = '45ef11a0374c78dc7ced3d28f5cec9b5'
+# دریافت تنظیمات از متغیرهای محیطی (GitHub Secrets)
+API_ID = int(os.environ.get('API_ID', 31356424))
+API_HASH = os.environ.get('API_HASH', '45ef11a0374c78dc7ced3d28f5cec9b5')
+SOURCE_CHANNEL = os.environ.get('SOURCE_CHANNEL', 'https://t.me/filembad')
+TARGET_CHANNEL = os.environ.get('TARGET_CHANNEL', '@TaKziBaM')
+SESSION_STRING = os.environ.get('SESSION_STRING', '')  # دریافت session string از Secrets
 
-# اطلاعات کانال‌ها
-SOURCE_CHANNEL = 'https://t.me/filembad'  # کانال منبع
-TARGET_CHANNEL = '@TaKziBaM'  # کانال مقصد
+print("="*50)
+print("🤖 ربات مدیریت کانال تلگرام")
+print(f"API_ID: {API_ID}")
+print(f"SOURCE: {SOURCE_CHANNEL}")
+print(f"TARGET: {TARGET_CHANNEL}")
+print(f"SESSION_STRING: {'✅ دارد' if SESSION_STRING else '❌ ندارد'}")
+print("="*50)
 
 # ایجاد دایرکتوری برای فایل‌های موقت
 TEMP_DIR = 'temp_configs'
@@ -72,8 +78,14 @@ def get_config_hash(config_text):
     clean = re.sub(r'@takzibam', '', clean, flags=re.IGNORECASE)  # حذف تگ
     return hashlib.md5(clean.encode()).hexdigest()
 
-# کلاینت تلگرام
-client = TelegramClient('channel_admin_session', API_ID, API_HASH)
+# کلاینت تلگرام - با StringSession اگر SESSION_STRING وجود داشته باشد
+if SESSION_STRING:
+    from telethon.sessions import StringSession
+    session = StringSession(SESSION_STRING)
+    client = TelegramClient(session, API_ID, API_HASH)
+else:
+    # حالت fallback: از فایل session استفاده کن
+    client = TelegramClient('channel_admin_session', API_ID, API_HASH)
 
 # تابع برای ارسال کانفیگ‌ها هر 120 ثانیه
 async def process_queue():
@@ -91,7 +103,7 @@ async def process_queue():
             if item_hash not in sent_hashes:
                 try:
                     if item_type == 'v2ray':
-                        caption = f"کانفینگ جدید v2ray\n\n`{item_data}\n\n@{TARGET_CHANNEL.replace('@', '')}"
+                        caption = f"کانفینگ جدید v2ray\n\n{item_data}\n\n@{TARGET_CHANNEL.replace('@', '')}"
                     elif item_type == 'proxy':
                         caption = f"پروکسی جدید تلگرام\n\n{item_data}\n\n@{TARGET_CHANNEL.replace('@', '')}"
                     
@@ -240,14 +252,25 @@ async def show_status():
             print(f"\n📊 وضعیت:")
             print(f"   آیتم‌ها در صف: {len(config_queue)}")
             print(f"   ارسال بعدی در: {int(next_send_in)} ثانیه")
-            print(f"   آیتم بعدی: {config_queue[0][0]}")
+            if config_queue:
+                print(f"   آیتم بعدی: {config_queue[0][0]}")
             print("-" * 40)
 
 async def main():
     global last_send_time
     
     # دریافت اطلاعات جلسه
-    await client.start()
+    if SESSION_STRING:
+        # اگر session string داریم، فقط connect کنیم
+        await client.connect()
+        
+        # بررسی اعتبار session
+        if not await client.is_user_authorized():
+            print("❌ خطا: session string نامعتبر است!")
+            return
+    else:
+        # اگر session string نداریم، از client.start استفاده کنیم
+        await client.start()
     
     # دریافت اطلاعات کانال‌ها
     print("=" * 50)
@@ -257,8 +280,11 @@ async def main():
     print("=" * 50)
     
     # بررسی اتصال
-    me = await client.get_me()
-    print(f"   👤 ورود به عنوان: {me.first_name} (@{me.username})")
+    try:
+        me = await client.get_me()
+        print(f"   👤 ورود به عنوان: {me.first_name} (@{me.username if me.username else 'بدون یوزرنیم'})")
+    except:
+        print("   ⚠️ مشکل در دریافت اطلاعات کاربر")
     
     print("\n⚙️  تنظیمات:")
     print(f"   • هر {SEND_INTERVAL} ثانیه یک کانفیگ ارسال می‌شود")
@@ -287,5 +313,7 @@ if __name__ == '__main__':
         loop.run_until_complete(main())
     except KeyboardInterrupt:
         print("\n🛑 ربات متوقف شد.")
+    except Exception as e:
+        print(f"\n💥 خطای غیرمنتظره: {e}")
     finally:
         loop.close()
