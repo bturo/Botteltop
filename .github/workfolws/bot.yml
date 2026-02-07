@@ -1,0 +1,40 @@
+name: Telegram Channel Manager Bot
+
+on:
+  workflow_dispatch:  # اجرای دستی
+  schedule:
+    # هر 5 دقیقه اجرا شود
+    - cron: '*/5 * * * *'
+    # زمان‌بندی‌های اضافی:
+    # - cron: '0 */2 * * *'  # هر 2 ساعت
+    # - cron: '0 0 * * *'    # هر روز نیمه‌شب
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # حداکثر زمان اجرا
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        
+    - name: Run Telegram Bot
+      env:
+        API_ID: ${{ secrets.API_ID }}
+        API_HASH: ${{ secrets.API_HASH }}
+        SOURCE_CHANNEL: ${{ secrets.SOURCE_CHANNEL }}
+        TARGET_CHANNEL: ${{ secrets.TARGET_CHANNEL }}
+        SESSION_STRING: ${{ secrets.SESSION_STRING }}
+        GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        GIST_ID: ${{ secrets.GIST_ID }}
+      run: |
+        python -m src.bot
